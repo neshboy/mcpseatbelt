@@ -1,0 +1,44 @@
+# Example MCP Seatbelt policy.
+#
+# Rules are checked top-to-bottom; the first rule whose "match" (an exact
+# tool name or a glob like "delete_*") matches the called tool name, AND
+# whose optional "when" argument conditions all hold, wins. If no rule
+# matches, the top-level "default" action applies.
+#
+# action: allow | deny | ask
+#   allow - forward the call to the real downstream MCP server.
+#   deny  - reject the call; it never reaches the real server.
+#   ask   - prompt for interactive y/n confirmation on the controlling
+#           terminal; fails closed (denies) when there is no controlling
+#           terminal, which is the normal case when an agent client
+#           launches mcpseatbelt over piped stdio.
+
+version: 1
+default: deny
+
+rules:
+  # Read-only filesystem access is low risk.
+  - name: allow-reads
+    match: "read_*"
+    action: allow
+
+  # Never allow destructive calls, no matter what arguments are passed.
+  - name: block-deletes
+    match: "delete_*"
+    action: deny
+
+  # Argument-shape example: rules are evaluated in order, so put more
+  # specific rules first. This one allows writes that stay inside /tmp
+  # without a prompt...
+  - name: allow-tmp-writes
+    match: "write_file"
+    action: allow
+    when:
+      path:
+        matches: "^/tmp/"
+
+  # ...while every other write falls through to here and requires a human
+  # to confirm interactively.
+  - name: confirm-writes
+    match: "write_file"
+    action: ask
