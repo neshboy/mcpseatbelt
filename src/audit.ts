@@ -50,6 +50,12 @@ export class AuditLog {
 
   constructor(path: string) {
     this.path = path;
+
+    const dir = dirname(path);
+    if (dir && !existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+
     const tail = readLastRecord(path);
     this.lastHash = tail?.hash ?? GENESIS_HASH;
     this.nextSeq = (tail?.seq ?? 0) + 1;
@@ -77,10 +83,6 @@ export class AuditLog {
     const hash = computeHash(base);
     const full: AuditRecord = { ...base, hash };
 
-    const dir = dirname(this.path);
-    if (dir && !existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
     appendFileSync(this.path, JSON.stringify(full) + "\n", "utf8");
 
     this.lastHash = hash;

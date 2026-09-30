@@ -132,16 +132,60 @@ function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== typeof b) return false;
   if (a === null || b === null) return a === b;
-  if (typeof a === "object" && typeof b === "object") {
-    return JSON.stringify(a) === JSON.stringify(b);
+  if (typeof a !== "object" || typeof b !== "object") return false;
+
+  const aIsArray = Array.isArray(a);
+  const bIsArray = Array.isArray(b);
+  if (aIsArray !== bIsArray) return false;
+
+  if (aIsArray && bIsArray) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
   }
-  return false;
+
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(bObj, key)) return false;
+    if (!deepEqual(aObj[key], bObj[key])) return false;
+  }
+  return true;
+}
+
+// Caches for compiled regexes, keyed by the (stable, parse-time-created) rule/condition
+// object they came from, so repeated calls against the same policy don't recompile the
+// same glob/regex on every single tools/call request.
+const ruleMatchRegexCache = new WeakMap<PolicyRule, RegExp>();
+const conditionMatchesRegexCache = new WeakMap<ArgCondition, RegExp>();
+
+function getRuleMatchRegex(rule: PolicyRule): RegExp {
+  let re = ruleMatchRegexCache.get(rule);
+  if (!re) {
+    re = globToRegExp(rule.match);
+    ruleMatchRegexCache.set(rule, re);
+  }
+  return re;
+}
+
+function getConditionMatchesRegex(condition: ArgCondition): RegExp {
+  let re = conditionMatchesRegexCache.get(condition);
+  if (!re) {
+    re = new RegExp(condition.matches as string);
+    conditionMatchesRegexCache.set(condition, re);
+  }
+  return re;
 }
 
 function matchesCondition(value: unknown, condition: ArgCondition): boolean {
   if (condition.equals !== undefined && !deepEqual(value, condition.equals)) return false;
   if (condition.matches !== undefined) {
-    const re = new RegExp(condition.matches);
+    const re = getConditionMatchesRegex(condition);
     if (!re.test(stringify(value))) return false;
   }
   if (condition.oneOf !== undefined && !condition.oneOf.some((candidate) => deepEqual(value, candidate))) {
@@ -162,7 +206,7 @@ function matchesWhen(args: unknown, when: ArgConditions | undefined): boolean {
 /** Finds the first rule that matches a given tool name + arguments, in declaration order. */
 export function findMatchingRule(policy: Policy, toolName: string, args: unknown): PolicyRule | undefined {
   for (const rule of policy.rules) {
-    const re = globToRegExp(rule.match);
+    const re = getRuleMatchRegex(rule);
     if (re.test(toolName) && matchesWhen(args, rule.when)) {
       return rule;
     }
